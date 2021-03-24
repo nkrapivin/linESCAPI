@@ -33,13 +33,15 @@ namespace linescapi {
         height = 0;
         length = 0;
         data = nullptr;
+        imgformat = V4L2_PIX_FMT_MJPEG;
     }
 
-    capture_params::capture_params(int w, int h) {
+    capture_params::capture_params(int w, int h, unsigned int format) {
         width = w;
         height = h;
         length = 0;
         data = nullptr;
+        imgformat = format;
     }
 
     capture_params::~capture_params() {
@@ -61,6 +63,10 @@ namespace linescapi {
         return height;
     }
 
+    const unsigned int capture_params::getFormat() const {
+        return imgformat;
+    }
+
     unsigned char* capture_params::getData() const {
         return data;
     }
@@ -71,19 +77,28 @@ namespace linescapi {
 
     void capture_params::ensure(unsigned int newsize) {
         // reallocate the camera buffer.
-        if (newsize > length) {
+        if (newsize != length) {
             if (data != nullptr) {
+                std::cout << "[linESCAPI]: " << "Freeing previous dynamic buffer len=" << length << std::endl;
                 delete[] data;
             }
 
-            std::cout << "Reallocating buffer to " << newsize << std::endl;
+            std::cout << "[linESCAPI]: " << "Reallocating buffer to " << newsize << std::endl;
             data = new unsigned char[newsize];
             length = newsize;
         }
     }
 
     void capture_params::zero() const {
-        memset(data, '\0', length);
+        if (data != nullptr) {
+            memset(data, '\0', length);
+        }
+    }
+
+    const unsigned int capture_params::setFormat(unsigned int format) {
+        unsigned int oldF = imgformat;
+        imgformat = format;
+        return oldF;
     }
 
     const int capture_params::setWidth(int w) {
@@ -101,16 +116,24 @@ namespace linescapi {
     camera::camera() {
         fd = -1;
         err = false;
+        in_progress = false;
+        param = nullptr;
+        start = nullptr;
+        length = 0;
+        CLEAR(fmt);
+        CLEAR(req);
+        CLEAR(buf);
+        type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     }
 
     bool camera::open(const std::string& path) {
         fd = v4l2_open(path.c_str(), O_RDWR | O_NONBLOCK, 0);
         if (fd < 0) {
-            std::cout << "Unable to open camera device." << std::endl;
-            return false;
+            err = true;
+            std::cout << "[linESCAPI]: " << "Unable to open camera device." << std::endl;
         }
 
-        return true;
+        return !err;
     }
 
     bool camera::close() {
@@ -121,7 +144,7 @@ namespace linescapi {
         int r = v4l2_close(fd);
         err = (r == -1);
         if (err) {
-            std::cout << "Unable to close camera device." << std::endl;
+            std::cout << "[linESCAPI]: " << "Unable to close camera device." << std::endl;
             return false;
         }
 
@@ -143,31 +166,40 @@ namespace linescapi {
 
     bool camera::init_capture(capture_params& cparam) {
         if (in_progress) {
+            std::cout << "[linESCAPI]: " << "A capture is already in progress!" << std::endl;
             return false;
         }
+
+        unsigned int imageformat = cparam.getFormat();
+        std::cout << "[linESCAPI]: " << "Using image format=" << imageformat << std::endl;
+        unsigned int imagefields = V4L2_FIELD_ANY; // technically we shouldn't care if we're using libv4l2...... :/
 
         CLEAR(fmt);
         fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         fmt.fmt.pix.width = cparam.getWidth();
         fmt.fmt.pix.height = cparam.getHeight();
-        fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-        fmt.fmt.pix.field = V4L2_FIELD_NONE;
+        fmt.fmt.pix.pixelformat = imageformat;
+        fmt.fmt.pix.field = imagefields;
         err = !xioctl(fd, VIDIOC_S_FMT, &fmt);
 
-        if (fmt.fmt.pix.pixelformat != V4L2_PIX_FMT_MJPEG) {
-            std::cout << "Camera does not support MJPEG format." << std::endl;
+        if (fmt.fmt.pix.pixelformat != imageformat) {
+            std::cout << "[linESCAPI]: " << "Camera does not support the target image format." << std::endl;
             err = true;
         }
 
         if ((fmt.fmt.pix.width != cparam.getWidth()) || (fmt.fmt.pix.height != cparam.getHeight())) {
-            std::cout << "Camera did not like your width or height." << std::endl;
+            std::cout << "[linESCAPI]: " << "Camera did not like your width or height. Try cropping the resolution in half?" << std::endl;
             err = true;
         }
 
-        if (fmt.fmt.pix.field != V4L2_FIELD_NONE) {
-            std::cout << "Camera does not support NONE fields." << std::endl;
-            err = true;
+/*
+// err, this caused issues when picking between image formats, so off to the commented code it goes!
+        if (fmt.fmt.pix.field != imagefields) {
+            std::cout << "[linESCAPI]: " << "Camera does not support target fields. Got " << fmt.fmt.pix.field << std::endl;
+            //err = true;
         }
+*/
+        std::cout << "[linESCAPI]: " << "Camera is using fields=" << fmt.fmt.pix.field << std::endl;
 
         if (!err) {
             in_progress = true;
@@ -179,7 +211,7 @@ namespace linescapi {
 
     bool camera::do_capture() {
         if (!in_progress) {
-            std::cout << "There is no capture in progress!" << std::endl;
+            std::cout << "[linESCAPI]: " << "There is no capture in progress!" << std::endl;
             return false;
         }
 
@@ -189,7 +221,7 @@ namespace linescapi {
         req.memory = V4L2_MEMORY_MMAP;
         err = !xioctl(fd, VIDIOC_REQBUFS, &req);
         if (err) {
-            std::cout << "Reqbufs fail." << std::endl;
+            std::cout << "[linESCAPI]: " << "Reqbufs fail." << std::endl;
             return false;
         }
 
@@ -199,7 +231,7 @@ namespace linescapi {
         buf.index = 0;
         err = !xioctl(fd, VIDIOC_QUERYBUF, &buf);
         if (err) {
-            std::cout << "Querybuf fail." << std::endl;
+            std::cout << "[linESCAPI]: " << "Querybuf fail." << std::endl;
             return false;
         }
 
@@ -207,7 +239,7 @@ namespace linescapi {
         start = v4l2_mmap(nullptr, length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
         err = (start == MAP_FAILED);
         if (err) {
-            std::cout << "v4l2_mmap() fail." << std::endl;
+            std::cout << "[linESCAPI]: " << "v4l2_mmap() fail." << std::endl;
             return false;
         }
 
@@ -217,25 +249,25 @@ namespace linescapi {
         buf.index = 0;
         err = !xioctl(fd, VIDIOC_QBUF, &buf);
         if (err) {
-            std::cout << "QBUF fail." << std::endl;
+            std::cout << "[linESCAPI]: " << "QBUF fail." << std::endl;
             return false;
         }
 
         type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         err = !xioctl(fd, VIDIOC_STREAMON, &type);
         if (err) {
-            std::cout << "STREAMON fail." << std::endl;
+            std::cout << "[linESCAPI]: " << "STREAMON fail." << std::endl;
             return false;
         }
 
-        std::cout << "buffer=" << start << ",len=" << length << std::endl;
+        std::cout << "[linESCAPI]: " << "mmap'd buffer=" << start << ",len=" << length << std::endl;
 
         return !err;
     }
 
     bool camera::is_capture_done() {
         if (!in_progress) {
-            std::cout << "There is no capture in progress!" << std::endl;
+            std::cout << "[linESCAPI]: " << "There is no capture in progress!" << std::endl;
             return false;
         }
 
@@ -259,33 +291,43 @@ namespace linescapi {
         buf.memory = V4L2_MEMORY_MMAP;
         err = !xioctl(fd, VIDIOC_DQBUF, &buf);
         if (err) {
-            std::cout << "DQBUF fail." << std::endl;
+            std::cout << "[linESCAPI]: " << "DQBUF fail." << std::endl;
+            return false;
         }
 
         // And finally, copy the camera data to our buffer!
-        param->ensure(length);
+        param->ensure(buf.bytesused); // only the actual used amount!
         param->zero(); // just in case.
-        memcpy(param->getData(), start, length);
+        memcpy(param->getData(), start, buf.bytesused);
+
+        // just in case, queue the buffer again
+        err = !xioctl(fd, VIDIOC_QBUF, &buf);
+        if (err) {
+            std::cout << "[linESCAPI]: " << "Failed to QBUF buffer after DQBUF." << std::endl;
+            return false;
+        }
+
         return !err;
     }
 
     bool camera::deinit_capture() {
         if (!in_progress) {
-            std::cout << "There is no capture in progress!" << std::endl;
+            std::cout << "[linESCAPI]: " << "There is no capture in progress!" << std::endl;
             return false;
         }
 
-        // comment this block of code if you have problems with camera hanging till you replug it o_O
         type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+        // comment this block of code if you have problems with camera hanging till you replug it o_O
         err = !xioctl(fd, VIDIOC_STREAMOFF, &type);
         if (err) {
-            std::cout << "STREAMOFF fail." << std::endl;
+            std::cout << "[linESCAPI]: " << "STREAMOFF fail. This may happen with some very cheap webcams! Please reload the uvcvideo module." << std::endl;
             return false;
         }
 
         err = (v4l2_munmap(start, length) == -1);
         if (err) {
-            std::cout << "v4l2_munmap() fail." << std::endl;
+            std::cout << "[linESCAPI]: " << "v4l2_munmap() fail." << std::endl;
             return false;
         }
 

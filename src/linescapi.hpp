@@ -9,17 +9,20 @@ namespace linescapi {
     class capture_params {
         int width;
         int height;
+        unsigned int imgformat;
         unsigned int length;
         unsigned char* data;
     public:
         capture_params();
-        capture_params(int w, int h);
+        capture_params(int w, int h, unsigned int format = V4L2_PIX_FMT_MJPEG);
         ~capture_params();
 
         const int getWidth() const;
         const int getHeight() const;
+        const unsigned int getFormat() const;
         unsigned char* getData() const;
         const unsigned int getLength() const;
+        const unsigned int setFormat(unsigned int format);
         const int setWidth(int width);
         const int setHeight(int height);
 

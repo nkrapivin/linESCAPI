@@ -1,10 +1,13 @@
 #include "linescapi.hpp"
 #include <iostream>
 #include <fstream>
+#include <unistd.h>
 
 // capture in 640x480 by default because this is supported by 99.99% of all webcams.
 #define WIDTH  (640)
 #define HEIGHT (480)
+
+#define FOCUS_SLEEP (false)
 
 static void dumpToFile(const std::string& path, unsigned char* contents, size_t size) {
     std::cout << "Writing " << size << " bytes to " << path << std::endl;
@@ -18,23 +21,31 @@ static void dumpToFile(const std::string& path, unsigned char* contents, size_t 
 int main(int argc, char *argv[], char* envp[]) {
     std::cout << "linESCAPI demo by nik" << std::endl;
 
-    if (argc <= 2) {
+    if (argc <= 3) {
         std::cout << "Usage:" << std::endl;
-        std::cout << "./linescapi.demo <path to video device> <output path>" << std::endl;
+        std::cout << argv[0] << " <path to video device> <output path> <number of frames> [optional]<use RGB? (any word or number)>" << std::endl;
         return EXIT_SUCCESS;
     }
 
     std::string videoDevice(argv[1]);
     std::string outputPath(argv[2]);
+    int framesNum = atoi(argv[3]);
+    bool useMJPEG = argc < 5;
 
     std::cout << "Video device: " << videoDevice << std::endl;
     std::cout << "Output file: " << outputPath << std::endl;
 
-    std::cout << "This demo will only capture frames in the MJPEG format!" << std::endl;
+    if (useMJPEG) {
+        std::cout << "Will use MJPEG" << std::endl;
+    }
+    else {
+        std::cout << "Will use raw RGB" << std::endl;
+    }
 
     // a dynamic capture result buffer.
-    linescapi::capture_params params(WIDTH, HEIGHT);
+    linescapi::capture_params params(WIDTH, HEIGHT, (useMJPEG ? V4L2_PIX_FMT_MJPEG : V4L2_PIX_FMT_RGB24));
 
+    // the camera object.
     linescapi::camera cam;
 
     // open camera fd
@@ -55,9 +66,27 @@ int main(int argc, char *argv[], char* envp[]) {
         return EXIT_FAILURE;
     }
 
+    // this is so the camera can focus before giving us the frames.
+    if (FOCUS_SLEEP) {
+        std::cout << "Giving the camera time to focus..." << std::endl;
+        sleep(5);
+        std::cout << "Wah, that was a good nap for sure" << std::endl;
+    }
+
     // busywait till the camera is doing the job.
-    while (!cam.is_capture_done()) {
-        /* capture is in progress, just busywait... */
+    for (int i = 0; i < framesNum; i++) {
+        while (!cam.is_capture_done()) {
+            /* capture is in progress, just busywait... */
+        }
+
+        // uh oh. continuing at this point is a very bad idea, let's just break.
+        if (cam.bad()) break;
+
+        char name[64]{'\0'};
+        snprintf(name, sizeof(name)-1, outputPath.c_str(), 1 + i);
+
+        std::cout << "Saving frame num=" << 1+i << std::endl;
+        dumpToFile(name, params.getData(), params.getLength());
     }
 
     // stop the capture stream.
@@ -72,8 +101,6 @@ int main(int argc, char *argv[], char* envp[]) {
         return EXIT_FAILURE;
     }
     
-    // dump to a file.
-    dumpToFile(outputPath, params.getData(), params.getLength());
     std::cout << "Capture Done!" << std::endl;
     
     /*  Technically the linescapi::camera's destructor will try to

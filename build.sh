@@ -1,7 +1,14 @@
 #!/bin/sh
 
+# clean up the build directory
 rm -rf build/*
 
-gcc -c src/linescapi.cpp -o build/linescapi.o
-gcc -c src/main.cpp -o build/main.o
-gcc build/linescapi.o build/main.o -o build/linescapi.demo -lstdc++ -lv4l2
+# set your compiler here, clang++ or g++ I don't care.
+CC=g++
+
+# build the api first, and then the demo.
+$CC -c src/linescapi.cpp -o build/linescapi.o
+$CC -c src/main.cpp -o build/main.o
+
+# link it all together!
+$CC build/linescapi.o build/main.o -o build/linescapi.demo -lv4l2

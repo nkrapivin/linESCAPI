@@ -29,6 +29,9 @@ namespace linescapi {
         // only used by the `camera` class.
         void ensure(unsigned int newsize);
         void zero() const;
+
+        // a little conversion helper.
+        bool convertToRGBA();
     };
 
     class camera {
@@ -63,6 +66,7 @@ namespace linescapi {
         bool do_capture();
         bool is_capture_done();
         bool deinit_capture();
+        bool name(std::string& result);
     };
 }
 

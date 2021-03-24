@@ -95,6 +95,31 @@ namespace linescapi {
         }
     }
 
+    bool capture_params::convertToRGBA() {
+        if (imgformat != V4L2_PIX_FMT_RGB24 || data == nullptr) {
+            return false;
+        }
+
+        // allocate a new buffer +1 channel.
+        unsigned int newlen = length * (width + height);
+        unsigned char* tmp = new unsigned char[newlen];
+
+        for (int pos = 0; pos < length; pos++) {
+            tmp[pos + 0] = data[pos + 0];
+            tmp[pos + 1] = data[pos + 1];
+            tmp[pos + 2] = data[pos + 2];
+
+            // technically this is more like RGBA and not RGB32, but screw you.
+            tmp[pos + 3] = 0xff;
+        }
+
+        delete[] data;
+        data = tmp;
+        length = newlen;
+
+        return true;
+    }
+
     const unsigned int capture_params::setFormat(unsigned int format) {
         unsigned int oldF = imgformat;
         imgformat = format;
@@ -268,7 +293,7 @@ namespace linescapi {
     bool camera::is_capture_done() {
         if (!in_progress) {
             std::cout << "[linESCAPI]: " << "There is no capture in progress!" << std::endl;
-            return false;
+            return true; // ON PURPOSE: so you would break out of the loop!
         }
 
         fd_set fds;
@@ -282,7 +307,7 @@ namespace linescapi {
         
         if (r == -1) {
             errno = EINTR;
-            return false;
+            return false; // here the capture is NOT done, so we return false!
         }
 
         // Capture done!
@@ -292,7 +317,7 @@ namespace linescapi {
         err = !xioctl(fd, VIDIOC_DQBUF, &buf);
         if (err) {
             std::cout << "[linESCAPI]: " << "DQBUF fail." << std::endl;
-            return false;
+            return true; // but here the capture *is* done, with an error!
         }
 
         // And finally, copy the camera data to our buffer!
@@ -304,7 +329,7 @@ namespace linescapi {
         err = !xioctl(fd, VIDIOC_QBUF, &buf);
         if (err) {
             std::cout << "[linESCAPI]: " << "Failed to QBUF buffer after DQBUF." << std::endl;
-            return false;
+            return true;
         }
 
         return !err;
@@ -334,6 +359,25 @@ namespace linescapi {
         in_progress = false;
 
         return !err;
+    }
+
+    bool camera::name(std::string& result) {
+        if (!is_opened()) {
+            return false;
+        }
+
+        struct v4l2_capability caps;
+        CLEAR(caps);
+        err = !xioctl(fd, VIDIOC_QUERYCAP, &caps);
+
+        if (err) {
+            std::cout << "[linESCAPI]: " << "Failed to query V4L2 device caps :(" << std::endl;
+            return false;
+        }
+
+        result = reinterpret_cast<char*>(&caps.card);
+
+        return true;
     }
 
     camera::~camera() {

@@ -7,6 +7,7 @@
 #define WIDTH  (640)
 #define HEIGHT (480)
 
+// some webcams need time to adjust.
 #define FOCUS_SLEEP (false)
 
 static void dumpToFile(const std::string& path, unsigned char* contents, size_t size) {
@@ -54,6 +55,15 @@ int main(int argc, char *argv[], char* envp[]) {
         return EXIT_FAILURE;
     }
 
+    // try to get the name.
+    std::string camname;
+    if (!cam.name(camname)) {
+        std::cout << "Failed to get camera's name." << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "Device's name: " << camname << std::endl;
+
     // setup width and height.
     if (!cam.init_capture(params)) {
         std::cout << "Failed to initialize capture." << std::endl;
@@ -70,7 +80,7 @@ int main(int argc, char *argv[], char* envp[]) {
     if (FOCUS_SLEEP) {
         std::cout << "Giving the camera time to focus..." << std::endl;
         sleep(5);
-        std::cout << "Wah, that was a good nap for sure" << std::endl;
+        std::cout << "Wah, that was a good nap for sure!" << std::endl;
     }
 
     // busywait till the camera is doing the job.
@@ -87,6 +97,13 @@ int main(int argc, char *argv[], char* envp[]) {
 
         std::cout << "Saving frame num=" << 1+i << std::endl;
         dumpToFile(name, params.getData(), params.getLength());
+
+        if (!useMJPEG) {
+            std::cout << "Saving RGBA frame num=" << 1+i << std::endl;
+            params.convertToRGBA();
+            snprintf(name, sizeof(name)-1, "TEMP_testrgba%d.rgba", 1 + i);
+            dumpToFile(name, params.getData(), params.getLength());
+        }
     }
 
     // stop the capture stream.
